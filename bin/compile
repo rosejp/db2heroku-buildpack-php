@@ -30,8 +30,8 @@ function download_and_install_ibm_db() {
   curl -LO "$CLI_URL"
   
   #2- Make directory
-  mkdir ./opt
-  mkdir ./opt/ibm 
+  mkdir $BUILD_DIR/opt
+  mkdir $BUILD_DIR/opt/ibm 
 
   # Extracting and Cleaning DS Driver
   rm -rf clidriver
