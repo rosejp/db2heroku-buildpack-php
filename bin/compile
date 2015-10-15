@@ -28,10 +28,6 @@ function download_and_install_ibm_db() {
 
   echo "Downloading IBM Data Server Driver...."
   curl -LO "$CLI_URL"
-  
-  #2- Make directory
-  mkdir $BUILD_DIR/opt
-  mkdir $BUILD_DIR/opt/ibm 
 
   # Extracting and Cleaning DS Driver
   rm -rf clidriver
@@ -76,8 +72,8 @@ function download_and_install_ibm_db() {
   export PHP_AUTOCONF=$BUILD_DIR/autoconf/bin/autoconf
   export PHP_AUTOHEADER=$BUILD_DIR/autoconf/bin/autoheader
 
-  echo "Installing ibm_db2 ..."
-  pecl install ibm_db2
+  #echo "Installing ibm_db2 ..."
+  #pecl install ibm_db2
 }
   
 # include .files when moving things around
