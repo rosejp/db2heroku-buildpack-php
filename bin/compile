@@ -72,6 +72,9 @@ function download_and_install_ibm_db() {
   export PHP_AUTOCONF=$BUILD_DIR/autoconf/bin/autoconf
   export PHP_AUTOHEADER=$BUILD_DIR/autoconf/bin/autoheader
 
+  #installing library
+  sudo apt-get install libssl0.9.8
+  
   echo "Installing ibm_db2 ..."
   pecl install ibm_db2
 }
