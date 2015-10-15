@@ -28,6 +28,9 @@ function download_and_install_ibm_db() {
 
   echo "Downloading IBM Data Server Driver...."
   curl -LO "$CLI_URL"
+  
+  #2- Make directory
+  mkdir /opt/ibm 
 
   # Extracting and Cleaning DS Driver
   rm -rf clidriver
