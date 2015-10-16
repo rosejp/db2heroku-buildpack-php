@@ -74,9 +74,8 @@ function download_and_install_ibm_db() {
   export PHP_AUTOHEADER=$BUILD_DIR/autoconf/bin/autoheader
 
   echo "Installing ibm_db2 ..."
-  mv $LP_DIR/libmysqlclient.so.16 .
-  ./configure --with-IBM_DB2=.
-  pecl install ibm_db2
+  pecl install ibm_db2 --with-IBM_DB2= $LP_DIR/libmysqlclient.so.16 
+  
 }
   
 # include .files when moving things around
