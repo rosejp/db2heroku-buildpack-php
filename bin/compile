@@ -73,8 +73,8 @@ function download_and_install_ibm_db() {
   export PHP_AUTOHEADER=$BUILD_DIR/autoconf/bin/autoheader
 
   echo "Installing ibm_db2 ..."
-  mkdir /ibmdb2_loc
-  ./configure --with-IBM_DB2=/ibmdb2_loc
+  mkdir ./ibmdb2_loc
+  ./configure --with-IBM_DB2=./ibmdb2_loc
   pecl install ibm_db2
 }
   
