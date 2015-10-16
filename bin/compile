@@ -1,48 +1,89 @@
 #!/usr/bin/env bash
 # bin/compile <build-dir> <cache-dir>
 
-function START_MSG() {
-    echo -n "$1... "
-}
-
-function DONE_MSG {
-    echo "Done"
-}
-
 # fail fast
 set -e
+
+# Heroku Revision.
+#
+# Affixed to all vendored binary output to represent changes to the
+# compilation environment without a change to the upstream version,
+# e.g. PHP 5.3.27 without, and then subsequently with, libmcrypt.
+heroku_rev='-2'
+
+# config
+MCRYPT_VERSION="2.5.8"
+APACHE_VERSION="2.2.25"
+APACHE_PATH="apache"
+PHP_VERSION="5.3.27"
+PHP_PATH="php"
 
 BIN_DIR=$(dirname $0)
 BUILD_DIR=$1
 CACHE_DIR=$2
 LP_DIR=`cd $(dirname $0); cd ..; pwd`
-PHP_PATH=$BUILD_DIR/zend
-APACHE_PATH=$BUILD_DIR/apache
-NGINX_PATH=$BUILD_DIR/nginx
-ZS_VERSION=8.5
-PHP_VERSION=5.6
-ZS_PATCHES="ZCLOUD-131 ZCLOUD-168 ZCLOUD-200"
 
+function download_and_install_ibm_db() {
+  CLI_URL="https://public.dhe.ibm.com/ibmdl/export/pub/software/data/db2/drivers/odbc_cli/linuxx64_odbc_cli.tar.gz"
+
+  echo "Downloading IBM Data Server Driver...."
+  curl -LO "$CLI_URL"
+
+  # Extracting and Cleaning DS Driver
+  rm -rf clidriver
+  tar -xzf linuxx64_odbc_cli.tar.gz
+
+  echo "Downloading autoconf..."
+  curl -LO http://ftp.gnu.org/gnu/autoconf/autoconf-2.69.tar.gz
+
+  echo "Downloading m4..."
+  curl -LO http://ftp.gnu.org/pub/gnu/m4/m4-1.4.13.tar.gz
+
+  # Extracting m4 and autoconf
+  tar -xzf autoconf-2.69.tar.gz
+  tar -xzf m4-1.4.13.tar.gz
+
+  echo "Installing m4 and autoconf ..."
+  cd m4-1.4.13
+  ./configure --prefix=$BUILD_DIR/m4
+  make
+  make install
+  export PATH=$BUILD_DIR/m4/bin:$PATH
+
+  cd $BUILD_DIR/autoconf-2.69
+  ./configure --prefix=$BUILD_DIR/autoconf
+  make
+  make install
+
+  cd $BUILD_DIR
+  #Cleaning clidriver, m4 and autoconf
+  rm -rf linuxx64_odbc_cli.tar.gz
+  rm -rf m4-1.4.13.tar.gz
+  rm -rf m4-1.4.13
+  rm -rf autoconf-2.69.tar.gz
+  rm -rf autoconf-2.69
+
+  ln -s $BUILD_DIR/php /app/php
+  ln -s $BUILD_DIR/vendor /app/vendor
+
+  export PATH=$BUILD_DIR/autoconf/bin:/app/php/bin:$PATH
+  export IBM_DB_HOME=$BUILD_DIR/clidriver
+  export LD_LIBRARY_PATH=/app/vendor/mcrypt/lib:$LD_LIBRARY_PATH
+  export PHP_AUTOCONF=$BUILD_DIR/autoconf/bin/autoconf
+  export PHP_AUTOHEADER=$BUILD_DIR/autoconf/bin/autoheader
+
+  echo "Installing ibm_db2 ..."
+  pecl install ibm_db2
+}
+  
 # include .files when moving things around
 shopt -s dotglob
 
-# If ZEND_DB2_DRIVER is not set to 0, then look for services which use db2 driver
-if [[ $ZEND_DB2_DRIVER != 0 ]]; then
-   if [[ "${VCAP_SERVICES}" == *dashDB* ]] || [[ "${VCAP_SERVICES}" == *SQLDB* ]]; then
-      ZEND_DB2_DRIVER=1
-   fi
-fi
-
-if [[ $ZEND_DB2_DRIVER == 1 ]]; then
-    ZS_PATCHES="$ZS_PATCHES ZCLOUD-196"
-fi
-
-START_MSG 'Initializing'
 cd $BUILD_DIR
 
-# move app things to www/html
-mkdir -p $CACHE_DIR/www/html
-mv * $CACHE_DIR/www/html
+# move app things to www
+mkdir -p $CACHE_DIR/www
+mv * $CACHE_DIR/www
 mv $CACHE_DIR/www .
 
 # keep Procfile
@@ -50,236 +91,66 @@ if [ -f www/Procfile ]; then
   mv www/Procfile .
 fi
 
-# default web server is apache
-if [[ -z $ZEND_WEB_SERVER ]]; then
-    ZEND_WEB_SERVER="apache"
-fi
+MCRYPT_URL="https://heroku-buildpack-php.s3.amazonaws.com/mcrypt-""$MCRYPT_VERSION""$heroku_rev"".tar.gz"
+echo "-----> Bundling mcrypt version $MCRYPT_VERSION"
+curl --silent --max-time 60 --location "$MCRYPT_URL" | tar xz
 
-if [[ $ZEND_WEB_SERVER == "apache" ]]; then
-    ZEND_WEB_SERVER="apache2.4"
-fi
+APACHE_URL="https://heroku-buildpack-php.s3.amazonaws.com/apache-""$APACHE_VERSION""$heroku_rev"".tar.gz"
+echo "-----> Bundling Apache version $APACHE_VERSION"
+curl --silent --max-time 60 --location "$APACHE_URL" | tar xz
 
-if [[ $ZEND_WEB_SERVER == "nginx" ]]; then
-    ZEND_WEB_SERVER="nginx1.8"
-fi
+PHP_URL="https://heroku-buildpack-php.s3.amazonaws.com/php-$PHP_VERSION""$heroku_rev"".tar.gz"
+echo "-----> Bundling PHP version $PHP_VERSION"
+curl --silent --max-time 60 --location "$PHP_URL" | tar xz
 
-DONE_MSG
+# update config files
+cp $LP_DIR/conf/httpd.conf $APACHE_PATH/conf
+cp $LP_DIR/conf/php.ini php
 
-# clear cache if needed
-if [[ -n $ZEND_CLEAR_CACHE ]]; then
-    START_MSG 'Clearing cache'
-    rm -rf $CACHE_DIR/*.tar.gz
-    DONE_MSG
-fi
-
-# Populate cache if needed
-OLD_PWD=`pwd`
-cd $CACHE_DIR
-
-if [[ ! -f $CACHE_DIR/clidriver.tar.gz && $ZEND_DB2_DRIVER == 1 ]]; then
-    START_MSG 'Downloading IBM DB2 Runtime Client'
-    curl -s -O http://repos.zend.com/cloudfoundry/clidriver.tar.gz
-    DONE_MSG
-fi
-
-REPOS_HOST=repos.zend.com
-if [[ $ZEND_DEVELOPMENT == 1 ]]; then
-    REPOS_HOST=repos-source.zend.com
-fi
-
-for P in $ZS_PATCHES; do
-    if [[ ! -f $CACHE_DIR/$P.tar.gz ]]; then
-        START_MSG "Downloading $P patch"
-        curl -s -O http://$REPOS_HOST/cloudfoundry/$ZS_VERSION/$P.tar.gz
-        DONE_MSG
-    fi
+# Restore old artifacts from the cache.
+CACHED_DIRS="ibmdb2"
+for dir in $CACHED_DIRS; do
+  cp -R $CACHE_DIR/$dir/* . &> /dev/null || true
 done
 
-cd $OLD_PWD
-
-
-if [[ $ZEND_DB2_DRIVER == 1 ]]; then
-    START_MSG "Unpacking IBM DB2 Runtime Client"
-    tar xzf $CACHE_DIR/clidriver.tar.gz
-    DONE_MSG
+if [ -f clidriver/lib/libdb2.so ]; then
+  # we have from cache, just restore php's db2.so
+  echo "-------> restoring ibm_db2 from cache"
+  mv ibm_db2.so php/lib/php/extensions/no-debug-non-zts-20090626/
+  echo "-------> restored ibm_db2"
+else
+  echo "-------> downloading and installing ibm_db2"
+  download_and_install_ibm_db
+  echo "-------> caching ibm_db2 and dependencies"
+  for dir in $CACHED_DIRS; do
+    mkdir -p $CACHE_DIR/$dir
+    cp -R clidriver $CACHE_DIR/$dir &> /dev/null || true
+    cp php/lib/php/extensions/no-debug-non-zts-20090626/ibm_db2.so $CACHE_DIR/$dir &> /dev/null || true
+    echo "-------> caching ibm_db2 done"
+  done
 fi
 
-# Start cleaning
-START_MSG 'Cleaning up some files'
 
-# Remove DB files
-rm -f $PHP_PATH/var/db/codetracing.db
-rm -f $PHP_PATH/var/db/devbar.db
-rm -f $PHP_PATH/var/db/deployment.db
-rm -f $PHP_PATH/var/db/gui.db
-rm -f $PHP_PATH/var/db/jobqueue.db
-rm -f $PHP_PATH/var/db/monitor.db
-rm -f $PHP_PATH/var/db/statistics.db
-rm -f $PHP_PATH/var/db/urlinsight.db
-rm -f $PHP_PATH/var/db/zsd.db
-
-# Remove logs
-rm -f $PHP_PATH/var/log/*
-rm -f $PHP_PATH/gui/lighttpd/logs/*
-touch $PHP_PATH/var/log/php.log
-
-# Remove deployed libraries and rename deployment files
-find $PHP_PATH/var/plugins/ -maxdepth 1 -mindepth 1 -type d -not -name CloudFoundry -exec rm -rf {} \;
-find $PHP_PATH/var/plugins/ -maxdepth 1 -mindepth 1 -type f -exec bash -c 'mv {} `dirname {}`/`basename {} .bak`' \;
-
-DONE_MSG
-
-# Update scripts
-START_MSG 'Update Zend Server scripts'
-
-sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $PHP_PATH/bin/create_cert.sh
-sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $PHP_PATH/bin/clean_semaphores.sh
-sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $PHP_PATH/bin/jqd.sh
-sed -i -e 's|ID=zend|ID=vcap|g' $PHP_PATH/bin/jqd.sh
-sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $PHP_PATH/bin/monitor-node.sh
-sed -i -e 's|/usr/local/zend|/app/zend|g' $PHP_PATH/bin/pear
-sed -i -e 's|/usr/local/zend|/app/zend|g' $PHP_PATH/bin/peardev
-sed -i -e 's|/usr/local/zend|/app/zend|g' $PHP_PATH/bin/pecl
-sed -i -e 's|/usr/local/zend|/app/zend|g' $PHP_PATH/bin/php-config
-if [[ -f $PHP_PATH/bin/php-fpm.sh ]]; then
-    sed -i -e 's|/usr/local/zend|/app/zend|g' $PHP_PATH/bin/php-fpm.sh
-fi
-sed -i -e 's|/usr/local/zend|/app/zend|g' $PHP_PATH/bin/phpize
-sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $PHP_PATH/bin/scd.sh
-sed -i -e 's|ID=zend|ID=vcap|g' $PHP_PATH/bin/scd.sh
-sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $PHP_PATH/bin/support_tool.sh
-sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $PHP_PATH/bin/zdd.sh
-sed -i -e 's|ID=zend|ID=vcap|g' $PHP_PATH/bin/zdd.sh
-sed -i -e 's|WEB_USER=zend|#WEB_USER=zend|g' $PHP_PATH/bin/zdd.sh
-sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $PHP_PATH/bin/zsd.sh
-sed -i -e 's|ID=zend|ID=vcap|g' $PHP_PATH/bin/zsd.sh
-sed -i -e 's|WEB_USER=zend|#WEB_USER=zend|g' $PHP_PATH/bin/zsd.sh
-sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $PHP_PATH/bin/zendctl.sh
-sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $PHP_PATH/bin/zs-manage
-
-DONE_MSG
-
-# Update configuration files
-START_MSG 'Update configuration files'
-
-# Update file locations in SQL schema files
-sed -i -e 's|/usr/local/zend|/app/zend|g' $PHP_PATH/share/*.sql
-
-# Determine document root
-# if [[ -z $ZEND_DOCUMENT_ROOT ]]; then
-#     ZEND_DOCUMENT_ROOT='/app/www/html'
-# else
-#     ZEND_DOCUMENT_ROOT="/app/www/html/$ZEND_DOCUMENT_ROOT"
-# fi
-
-# Update file locations in ini files
-sed -i -e "s|/usr/sbin/apache2ctl|/app/apache/sbin/apache2ctl|g" $PHP_PATH/etc/zdd.ini
-sed -i -e "s|/etc/apache2|/app/apache/etc/apache2|g" $PHP_PATH/etc/zsd.ini
-sed -i -e "s|/usr/sbin|/app/apache/sbin|g" $PHP_PATH/etc/zsd.ini
-
-# Update hard coded path in zs-manage
-sed -i -e "s|/etc/zce.rc|/app/etc/zce.rc|" $PHP_PATH/share/zs-cli-tools/library/ZServer/Cli/Tool/Command/Manage/Abstract.php
-
-# Fix default library symlinks
-ln -sf /app/zend/var/libraries/Symfony_2.3/2.3.23 $PHP_PATH/var/libraries/Symfony_2.3/default
-ln -sf /app/zend/var/libraries/Zend_Framework_1/1.12.9 $PHP_PATH/var/libraries/Zend_Framework_1/default
-ln -sf /app/zend/var/libraries/Zend_Framework_2/2.3.3 $PHP_PATH/var/libraries/Zend_Framework_2/default
-ln -sf /app/zend/var/libraries/ZendServerSDK/1.0 $PHP_PATH/var/libraries/ZendServerSDK/default
-
-# Update config files
-mkdir -p etc
-cp $LP_DIR/conf/etc/zce.rc.$ZEND_WEB_SERVER etc/zce.rc
-cp -rf $LP_DIR/conf/zend/* $PHP_PATH
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/url_insight.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/sc.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/zend_libraries.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/monitor.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/datacache.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/ZendGlobalDirectives.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/pagecache.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/statistics.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/jobqueue.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/zray.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/debugger.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/codetracing.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/statistics_ext.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/opcache.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/zend_extension_manager.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/conf.d/utils.ini
-
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/jqd.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/monitor_node.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/scd.ini
-sed -i -e "s|/usr/local/zend|/app/zend|g" $PHP_PATH/etc/zdd.ini
-
-DONE_MSG
 
 # make php available on bin
 mkdir -p bin
-ln -sf /app/zend/bin/php bin/php
+ln -s /app/php/bin/php bin/php
 
-# move json-env-extract.php into bin and make it executable
-START_MSG 'Installing json-env-extract.php'
-mv $LP_DIR/json-env-extract.php bin/
-chmod +x bin/json-env-extract.php
-DONE_MSG
-
-START_MSG 'Setting zs-manage timeout'
-sed -i -e "s/'timeout'[ \t]*=>[ \t]*60/'timeout' => 600/" $PHP_PATH/share/zs-cli-tools/library/ZendX/Service/ZendServer.php
-DONE_MSG
-
-START_MSG 'Downloading and installing composer'
-curl -s https://getcomposer.org/composer.phar -o $PHP_PATH/bin/composer.phar
-DONE_MSG
-
-# Install shell scripts and nothing
-for SCRIPT in boot.sh bootstrap.sh customize-apache.sh customize-nginx.sh mysql_detect.sh nothing; do
-    START_MSG "Installing $SCRIPT"
-    mv $LP_DIR/$SCRIPT .
-    chmod +x $SCRIPT
-    DONE_MSG
+cat >>boot.sh <<EOF
+for var in \`env|cut -f1 -d=\`; do
+  echo "PassEnv \$var" >> /app/apache/conf/httpd.conf;
 done
+touch /app/apache/logs/error_log
+touch /app/apache/logs/access_log
+tail -F /app/apache/logs/error_log &
+tail -F /app/apache/logs/access_log &
+export LD_LIBRARY_PATH=/app/php/lib/php:/app/clidriver/lib
+export PHP_INI_SCAN_DIR=/app/www
+echo "Launching apache"
+exec /app/apache/bin/httpd -DNO_DETACH
+EOF
 
-mv $LP_DIR/libmysqlclient.so.16 .
+chmod +x boot.sh
 
-START_MSG 'Disabling Z-Ray'
-sed -i -e 's/^zray.enable\s*=.*$/zray.enable=0/' $PHP_PATH/share/zs-cli-tools/library/ZendX/Service/ZendServer.php
-DONE_MSG
-
-if [[ $ZEND_WEB_SERVER == "apache2.4" ]]; then
-    START_MSG "Fixing symlinks"
-    ln -sf /app/apache/sbin/apache2ctl $PHP_PATH/bin/apachectl
-    ln -sf /app/zend/lib/php/libphp5.so $APACHE_PATH/lib/apache2/modules/libphp5.so
-    ln -sf /app/apache/var/log/apache2/error.log $PHP_PATH/var/log/error.log
-    ln -sf /app/apache/var/log/apache2/access.log $PHP_PATH/var/log/access.log
-    ln -sf /app/apache/var/log/apache2/other_vhosts_access.log $PHP_PATH/var/log/other_vhosts_access.log
-    ln -sf /app/apache/etc/init.d/apache2 $PHP_PATH/etc/rc.d/S02apache
-    ln -sf /app/apache/etc/init.d/apache2 $PHP_PATH/etc/rc.d/K07apache
-    mv $LP_DIR/conf/apache/apache2 $APACHE_PATH/etc/init.d/
-    DONE_MSG
-
-    START_MSG "Customizing apache configuration"
-    mv $LP_DIR/conf/apache/zendserver_gui.conf $APACHE_PATH/etc/apache2/sites-available
-    mv $LP_DIR/conf/apache/000-default.conf $APACHE_PATH/etc/apache2/sites-available
-    sed -i -e "s|/usr/local/zend|/app/zend|g" $APACHE_PATH/etc/apache2/sites-available/*
-    sed -i -e 's|/usr|/app/apache|g' $APACHE_PATH/etc/apache2/mods-available/*
-    sed -i -e "s|/var/www/html|/app/www/html|g" $APACHE_PATH/etc/apache2/apache2.conf
-    sed -i -e 's|/var|/app/apache/var|g' $APACHE_PATH/etc/apache2/apache2.conf
-    sed -i -e 's|/etc|/app/apache/etc|g' $APACHE_PATH/etc/apache2/apache2.conf
-    sed -i -e 's|^#ServerRoot|ServerRoot|g' $APACHE_PATH/etc/apache2/apache2.conf
-    sed -i -e 's|/var|/app/apache/var|g' $APACHE_PATH/etc/apache2/envvars
-    sed -i -e 's|/etc/zce.rc|/app/etc/zce.rc|g' $APACHE_PATH/etc/apache2/envvars
-    sed -i -e 's|/etc|/app/apache/etc|g' $APACHE_PATH/sbin/apache2ctl
-    sed -i -e 's|/var|/app/apache/var|g' $APACHE_PATH/sbin/apache2ctl
-    sed -i -e 's|/usr|/app/apache|g' $APACHE_PATH/sbin/apache2ctl
-    sed -i -e 's|/var/log|/app/apache/var/log|g' $APACHE_PATH/etc/apache2/sites-available/000-default.conf
-    sed -i -e 's|/etc|/app/apache/etc|g' $APACHE_PATH/etc/init.d/apache2
-    ln -sf ../mods-available/proxy.load $APACHE_PATH/etc/apache2/mods-enabled/proxy.load
-    ln -sf ../mods-available/proxy_http.load $APACHE_PATH/etc/apache2/mods-enabled/proxy_http.load
-    cp $LP_DIR/conf/nginx/conf/403.html $APACHE_PATH
-    cp $LP_DIR/conf/nginx/conf/wait.html $APACHE_PATH
-    cp $LP_DIR/conf/nginx/conf/ZendServer6-Wait-page-block-image02.png $APACHE_PATH
-    cp $LP_DIR/conf/nginx/conf/ZendServer6-Wait-page-Zend-Server-logo.png $APACHE_PATH
-    DONE_MSG
-fi
-
+# clean the cache
+#rm -rf $CACHE_DIR
