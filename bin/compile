@@ -74,8 +74,8 @@ function download_and_install_ibm_db() {
 
   echo "Installing ibm_db2 ..."
   mkdir ./ibmdb2_loc
-  ./configure --with-IBM_DB2=./ibmdb2_loc
-  pecl install ibm_db2
+  # ./configure --with-IBM_DB2=./ibmdb2_loc
+  pecl install ibm_db2 --with-IBM_DB2=./ibmdb2_loc
 }
   
 # include .files when moving things around
