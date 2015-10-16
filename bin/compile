@@ -17,7 +17,6 @@ APACHE_VERSION="2.2.25"
 APACHE_PATH="apache"
 PHP_VERSION="5.3.27"
 PHP_PATH="php"
-LP_DIR=`cd $(dirname $0); cd ..; pwd`
 
 BIN_DIR=$(dirname $0)
 BUILD_DIR=$1
@@ -26,6 +25,13 @@ LP_DIR=`cd $(dirname $0); cd ..; pwd`
 
 function download_and_install_ibm_db() {
   CLI_URL="https://public.dhe.ibm.com/ibmdl/export/pub/software/data/db2/drivers/odbc_cli/linuxx64_odbc_cli.tar.gz"
+
+  echo "Downloading IBM Data Server Driver...."
+  curl -LO "$CLI_URL"
+
+  # Extracting and Cleaning DS Driver
+  rm -rf clidriver
+  tar -xzf linuxx64_odbc_cli.tar.gz
 
   echo "Downloading autoconf..."
   curl -LO http://ftp.gnu.org/gnu/autoconf/autoconf-2.69.tar.gz
@@ -50,7 +56,8 @@ function download_and_install_ibm_db() {
   make install
 
   cd $BUILD_DIR
-  #Cleaning clidriver, m4 and autoconif
+  #Cleaning clidriver, m4 and autoconf
+  rm -rf linuxx64_odbc_cli.tar.gz
   rm -rf m4-1.4.13.tar.gz
   rm -rf m4-1.4.13
   rm -rf autoconf-2.69.tar.gz
@@ -60,23 +67,14 @@ function download_and_install_ibm_db() {
   ln -s $BUILD_DIR/vendor /app/vendor
 
   export PATH=$BUILD_DIR/autoconf/bin:/app/php/bin:$PATH
+  export IBM_DB_HOME=$BUILD_DIR/clidriver
   export LD_LIBRARY_PATH=/app/vendor/mcrypt/lib:$LD_LIBRARY_PATH
   export PHP_AUTOCONF=$BUILD_DIR/autoconf/bin/autoconf
   export PHP_AUTOHEADER=$BUILD_DIR/autoconf/bin/autoheader
-  
-  cd $CACHE_DIR
-  echo "Downloading IBM Data Server Driver...."
-  curl -LO "$CLI_URL"
-
-  # Extracting and Cleaning DS Driver
-  rm -rf clidriver
-  tar -xzf $CACHE_DIR/linuxx64_odbc_cli.tar.gz
-  rm -rf linuxx64_odbc_cli.tar.gz
-  export IBM_DB_HOME=$BUILD_DIR/clidriver
 
   echo "Installing ibm_db2 ..."
+  ./configure --extension-dir= clidriver/lib/
   pecl install ibm_db2
-  
 }
   
 # include .files when moving things around
