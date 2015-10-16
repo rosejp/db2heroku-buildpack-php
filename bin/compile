@@ -27,6 +27,7 @@ LP_DIR=`cd $(dirname $0); cd ..; pwd`
 function download_and_install_ibm_db() {
   CLI_URL="https://public.dhe.ibm.com/ibmdl/export/pub/software/data/db2/drivers/odbc_cli/linuxx64_odbc_cli.tar.gz"
 
+  cd $CACHE_DIR
   echo "Downloading IBM Data Server Driver...."
   curl -LO "$CLI_URL"
 
