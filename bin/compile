@@ -73,7 +73,9 @@ function download_and_install_ibm_db() {
   export PHP_AUTOHEADER=$BUILD_DIR/autoconf/bin/autoheader
 
   echo "Installing ibm_db2 ..."
-  ./linuxx64_odbc_cli/configure --extension-dir= clidriver/lib
+  cd inuxx64_odbc_cli
+  ./configure --extension-dir=clidriver/lib
+  cd $BUILD_DIR
   pecl install ibm_db2
 }
   
