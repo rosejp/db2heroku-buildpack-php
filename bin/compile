@@ -17,6 +17,7 @@ APACHE_VERSION="2.2.25"
 APACHE_PATH="apache"
 PHP_VERSION="5.3.27"
 PHP_PATH="php"
+LP_DIR=`cd $(dirname $0); cd ..; pwd`
 
 BIN_DIR=$(dirname $0)
 BUILD_DIR=$1
