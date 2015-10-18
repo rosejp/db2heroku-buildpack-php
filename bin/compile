@@ -73,8 +73,7 @@ function download_and_install_ibm_db() {
   export PHP_AUTOHEADER=$BUILD_DIR/autoconf/bin/autoheader
 
   echo "Installing ibm_db2 ..."
-  cd $BUILD_DIR/clidriver
-  ./configure --extension-dir=clidriver/lib
+  extension-dir= "clidriver/lib"
   cd $BUILD_DIR
   pecl install ibm_db2
 }
