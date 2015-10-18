@@ -73,7 +73,7 @@ function download_and_install_ibm_db() {
   export PHP_AUTOHEADER=$BUILD_DIR/autoconf/bin/autoheader
 
   echo "Installing ibm_db2 ..."
-  #pecl install ibm_db2
+  pecl install ibm_db2
 }
   
 # include .files when moving things around
